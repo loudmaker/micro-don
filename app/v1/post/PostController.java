@@ -14,14 +14,12 @@ import java.util.stream.Collectors;
 public class PostController extends Controller {
 
     private HttpExecutionContext ec;
-    private PostResourceHandler handler;
 
     @Inject
-    public PostController(HttpExecutionContext ec, PostResourceHandler handler) {
+    public PostController(HttpExecutionContext ec) {
         this.ec = ec;
-        this.handler = handler;
     }
-
+/*
     public CompletionStage<Result> list() {
         return handler.find().thenApplyAsync(posts -> {
             final List<PostResource> postList = posts.collect(Collectors.toList());
@@ -58,4 +56,5 @@ public class PostController extends Controller {
             return created(Json.toJson(savedResource));
         }, ec.current());
     }
+    */
 }

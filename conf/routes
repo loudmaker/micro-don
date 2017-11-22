@@ -1,3 +1,5 @@
 GET     /                           controllers.HomeController.index
 
-->     /v1/posts                    posts.Routes
+
+GET     /rounded-transactions       controllers.HomeController.roundedTransactions(email: String, passwd: String)
+

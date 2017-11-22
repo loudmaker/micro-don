@@ -1,31 +1,26 @@
-name := """play-java-rest-api-example"""
+name := """micro-don"""
 
-version := "2.6.x"
+version := "1.0-SNAPSHOT"
 
 inThisBuild(
   List(
-    scalaVersion := "2.12.3",
-    dependencyOverrides := Seq(
-       "org.codehaus.plexus" % "plexus-utils" % "3.0.18",
-       "com.google.code.findbugs" % "jsr305" % "3.0.1",
-       "com.google.guava" % "guava" % "22.0",
-       "com.typesafe.akka" %% "akka-stream" % "2.5.6",
-       "com.typesafe.akka" %% "akka-actor" % "2.5.6"
-    )
+    scalaVersion := "2.11.11"
   )
 )
 
 
-lazy val GatlingTest = config("gatling") extend Test
-
+//lazy val GatlingTest = config("gatling") extend Test
+lazy val root = (project in file(".")).enablePlugins(PlayJava)
+/*
 lazy val root = (project in file(".")).enablePlugins(PlayJava, GatlingPlugin).configs(GatlingTest)
   .settings(inConfig(GatlingTest)(Defaults.testSettings): _*)
   .settings(
     scalaSource in GatlingTest := baseDirectory.value / "/gatling/simulation"
   )
-
-libraryDependencies += guice
-libraryDependencies += javaJpa
+*/
+//libraryDependencies += guice
+//libraryDependencies += javaJpa
+libraryDependencies += javaWs
 /*
 libraryDependencies += "com.h2database" % "h2" % "1.4.194"
 
@@ -39,4 +34,4 @@ libraryDependencies += "io.gatling" % "gatling-test-framework" % "2.3.0" % Test
 */
 PlayKeys.externalizeResources := false
 
-testOptions in Test := Seq(Tests.Argument(TestFrameworks.JUnit, "-a", "-v"))
+//testOptions in Test := Seq(Tests.Argument(TestFrameworks.JUnit, "-a", "-v"))

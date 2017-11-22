@@ -9,6 +9,7 @@ public class PostResource {
     private String title;
     private String body;
 
+
     public PostResource() {
     }
 
@@ -19,11 +20,9 @@ public class PostResource {
         this.body = body;
     }
 
-    public PostResource(PostData data, String link) {
-        this.id = data.id.toString();
+    public PostResource(String link) {
         this.link = link;
-        this.title = data.title;
-        this.body = data.body;
+
     }
 
     public String getId() {
