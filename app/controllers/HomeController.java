@@ -7,9 +7,12 @@ import javax.inject.Inject;
 import play.Configuration;
 import java.lang.System;
 import java.lang.String;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import play.libs.ws.*;
-//import com.fasterxml.jackson.databind.JsonNode;
+import play.mvc.BodyParser.Json;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 //import static java.util.concurrent.CompletableFuture;
 
 /**
@@ -29,49 +32,76 @@ public class HomeController extends Controller {
 
     public CompletionStage<Result> roundedTransactions(String email, String password) {
 
+        return getAllTransaction(email, password, null);
+    }
 
-        WSRequest request = ws.url("https://sync.bankin.com/v2/transactions?client_id="+config.getString("bankin.clientId")+"&client_secret="+config.getString("bankin.clientSecret"))
+    private CompletionStage<Result> getAllTransaction(String email, String password, String nextUri) {
+
+        WSRequest request = ws.url("https://sync.bankin.com/v2/transactions")
                 .setHeader("Bankin-Version", "2016-01-18")
                 .setHeader("Authorization", "Bearer "+accessToken)
+                .setQueryParameter("client_id",     config.getString("bankin.clientId"))
+                .setQueryParameter("client_secret", config.getString("bankin.clientSecret"))
                 .setRequestTimeout(5000);
 
-        //CompletionStage<JsonNode> jsonPromise = request.get().thenApply(WSResponse::asJson);
+        if(nextUri != null){
+            request = ws.url(nextUri)
+                    .setHeader("Bankin-Version", "2016-01-18")
+                    .setHeader("Authorization", "Bearer "+accessToken)
+                    .setRequestTimeout(5000);
+        }
 
-        /*
-        ObjectNode result = Json.newObject();
-    result.put("exampleField1", "foobar");
-    result.put("exampleField2", "Hello world!");
-    return ok(result);
-         */
-        //jsonPromise.thenApplyAsync()
-        return request.get().thenApply(response -> {
-            //WSResponseHeaders responseHeaders = response. getHeaders();
-            /*
-            System.out.println("responnnnnnse : "+response.getStatus());
-            if (response.getStatus() == 200) {
+        return request.get().thenCompose(response -> {
 
+            //Bankin response has an unauthorized response, so token is bad, so renew token
+            if (response.getStatus() == 401) {
+                return renewBankinAccessToken(email, password).thenCompose(atResp -> {
+
+                    //Token has been released, replay transaction request
+                    if (atResp.getStatus() == 200) {
+                        return getAllTransaction(email, password, null);
+                    }
+                    //Token not released, render error with status
+                    return CompletableFuture.supplyAsync(() -> status(atResp.getStatus(), atResp.asJson()).as("application/json"));
+                });
             }
-            */
-            //return ok("");
-            return new Result(401);
-        });
-        /*
-        return CompletableFuture.supplyAsync(() -> returnTrois() )
-                .thenApply(i -> ok("Got result: " + i));
 
-        //https://sync.bankin.com/v2/transactions?client_id=775683bc70d94beaa8044c81b2f16006&client_secret=sMgdYUzUPpo1DxbR67qP2ZbuTmU7H9gikvWPigDnQro9fk0PsRcb4EvI0iRheAJr
-        return ok();
-        */
+            JsonNode jsonResp = response.asJson();
+            if(jsonResp.has("resources"){
+                ObjRes toto = jsonResp.findPath("resources");
+
+                if(jsonResp.has("pagination")){
+                    String jsonNextUri = jsonResp.findPath("pagination").findPath("next_uri").textValue();
+                    if(jsonNextUri != null){
+                        return getAllTransaction(email, password, jsonNextUri);
+                    }
+                    System.out.println("pagination is null");
+                }
+
+                return CompletableFuture.supplyAsync(() -> ok(toto).as("application/json"));
+            }
+
+            return CompletableFuture.supplyAsync(() -> status(response.getStatus(), jsonResp).as("application/json"));
+        });
     }
-/*
-    private int returnTrois() {
-        System.out.println("email : '" + email + "' password : '" + password + "'");
-        System.out.println("AT : "+accessToken);
-        System.out.println(
-            config.getString("bankin.clientId") + " " +
-            config.getString("bankin.clientSecret")
-        );
-        return 3;
+
+    private CompletionStage<WSResponse> renewBankinAccessToken(String email, String password) {
+
+        WSRequest request = ws.url("https://sync.bankin.com/v2/authenticate")
+                .setHeader("Bankin-Version", "2016-01-18")
+                .setQueryParameter("password", password)
+                .setQueryParameter("email", email)
+                .setQueryParameter("client_id", config.getString("bankin.clientId"))
+                .setQueryParameter("client_secret", config.getString("bankin.clientSecret"))
+                .setRequestTimeout(5000);
+
+        return request.post("").whenComplete((response, ex) -> {
+            if (response.getStatus() == 200) {
+                accessToken = response.asJson().findPath("access_token").textValue();
+                if(accessToken == null){
+                    accessToken = "";
+                }
+            }
+        });
     }
-    */
 }
