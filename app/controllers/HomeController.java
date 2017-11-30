@@ -1,24 +1,24 @@
 package controllers;
 
+import enums.RoundType;
+import mappings.Transaction;
 import play.mvc.Controller;
 import play.mvc.Result;
-import mappings.*;
 import javax.inject.Inject;
 import play.Configuration;
-import java.lang.System;
 import java.lang.String;
-import java.net.MalformedURLException;
-import java.net.URL;
 import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
 import java.util.concurrent.*;
-
+import java.util.stream.Collectors;
 import play.libs.ws.*;
 import play.libs.Json;
+import providers.BankinProvider;
+import mappings.User;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import utils.Url;
 
 /**
  * This controller contains an action to handle HTTP requests
@@ -29,98 +29,101 @@ public class HomeController extends Controller {
     @Inject Configuration config;
     @Inject WSClient ws;
 
-    private String accessToken = "";
-    private ArrayList<Transaction> transactionList = new ArrayList<Transaction>();
 
+    public CompletionStage<Result> roundedTransactions(String email, String password, String roundType) {
 
-    public Result index() {
-        return ok(views.html.index.render());
-    }
-
-
-    public CompletionStage<Result> roundedTransactions(String email, String password) {
-        transactionList.clear();
-        return getAllTransaction(email, password, null);
-    }
-
-    private CompletionStage<Result> getAllTransaction(String email, String password, String afterParam) {
-
-        WSRequest request = ws.url("https://sync.bankin.com/v2/transactions")
-                .setHeader("Bankin-Version", "2016-01-18")
-                .setHeader("Authorization", "Bearer " + accessToken)
-                .setQueryParameter("client_id",     config.getString("bankin.clientId"))
-                .setQueryParameter("client_secret", config.getString("bankin.clientSecret"))
-                .setRequestTimeout(10000);
-        if(afterParam != null){
-            request.setQueryParameter("after", afterParam);
+        System.out.println("NEW BANKIN PROVIDER FOR " +email + " " +password);
+        //Few checks before processing
+        RoundType roundTypeEnum = RoundType.exists(roundType);
+        if(roundTypeEnum == null){
+            return CompletableFuture.supplyAsync(() ->
+                badRequest("bad enum type '" + roundType + "', please provide enum as : " + RoundType.list.stream().map(Object::toString).collect(Collectors.joining(", ")))
+            );
         }
 
-        return request.get().thenComposeAsync(response -> {
+        BankinProvider bp = new BankinProvider(config, ws, email, password);
+        return bp.getAllTransaction().thenApplyAsync( either -> {
 
-            //Bankin response has an unauthorized response, so token is bad, so renew token
-            if (response.getStatus() == 401) {
-                return renewBankinAccessToken(email, password).thenComposeAsync(atResp -> {
+            //Array list transactions
+            if(either.left.isPresent()) {
 
-                    //Token has been released, replay transaction request
-                    if (atResp.getStatus() == 200) {
-                        return getAllTransaction(email, password, null);
-                    }
-                    //Token not released, render error with status
-                    return CompletableFuture.supplyAsync(() -> status(atResp.getStatus(), atResp.asJson()).as("application/json"));
-                });
+                return ok(Json.toJson(either.left.get().stream().map(x -> {
+
+                    //Processing the rounded amount
+                    x.setRounded_amount(-x.getAmount() - roundTypeEnum.round(-x.getAmount()));
+                    return x;
+                }).collect(Collectors.toList())));
+            //Or errors
+            } else {
+                return either.right.get();
             }
-
-            JsonNode jsonResp = response.asJson();
-            if (jsonResp.has("resources")) {
-
-                System.out.println("add transaction to array "+afterParam);
-
-                ArrayNode arrayRes = (ArrayNode) jsonResp.withArray("resources");
-                Iterator<JsonNode> it = arrayRes.iterator();
-                while (it.hasNext()) {
-                    Transaction resource = Json.fromJson(it.next(), Transaction.class);
-                    transactionList.add(resource);
-                }
-
-                if (jsonResp.has("pagination")) {
-                    String jsonNextUri = jsonResp.findPath("pagination").findPath("next_uri").textValue();
-                    if (jsonNextUri != null && jsonNextUri.length() > 0) {
-                        try {
-                            jsonNextUri = Url.getParamValueUrl(new URL("https://sync.bankin.com" + jsonNextUri), "after");
-                        } catch(MalformedURLException e){}
-
-                        //Throttle 10 requests per 1 sec max
-                        try {Thread.sleep(100);} catch (InterruptedException e) {}
-
-                        if(jsonNextUri != null){
-                            return getAllTransaction(email, password, jsonNextUri);
-                        }
-                    }
-                }
-                return CompletableFuture.supplyAsync(() -> ok(Json.toJson(transactionList)).as("application/json"));
-            }
-            return CompletableFuture.supplyAsync(() -> status(response.getStatus(), jsonResp).as("application/json"));
         });
     }
 
 
-    private CompletionStage<WSResponse> renewBankinAccessToken(String email, String password) {
+    public CompletionStage<Result> roundedTransactionsAllUser(Long dateBegin, Long dateEnd) {
 
-        WSRequest request = ws.url("https://sync.bankin.com/v2/authenticate")
-                .setHeader("Bankin-Version", "2016-01-18")
-                .setQueryParameter("password", password)
-                .setQueryParameter("email", email)
-                .setQueryParameter("client_id", config.getString("bankin.clientId"))
-                .setQueryParameter("client_secret", config.getString("bankin.clientSecret"))
-                .setRequestTimeout(5000);
+        ArrayList<User> users = new ArrayList<User>();
+        users.add(new User("user1@mail.com", "a!Strongp#assword1", RoundType.UPPER_TEN_DECIMAL));
+        users.add(new User("user2@mail.com", "a!Strongp#assword2", RoundType.UPPER_TEN_DECIMAL));
+        users.add(new User("user3@mail.com", "a!Strongp#assword3", RoundType.UPPER_TEN_DECIMAL));
 
-        return request.post("").whenComplete((response, ex) -> {
-            if (response.getStatus() == 200) {
-                accessToken = response.asJson().findPath("access_token").textValue();
-                if(accessToken == null){
-                    accessToken = "";
-                }
-            }
+
+        List<CompletableFuture<WSResponse>> collect = users.stream().map(x -> {
+
+            WSRequest request = ws.url("http://localhost:9000/rounded-transactions")
+                    .setQueryParameter("email", x.getEmail())
+                    .setQueryParameter("passwd", x.getPassword())
+                    .setQueryParameter("roundType", x.getRoundType().toString())
+                    .setRequestTimeout(10000);
+            return request.get().toCompletableFuture();
+
+        }).collect(Collectors.toList());
+
+
+        CompletableFuture<List<WSResponse>> allDone = sequence(collect);
+        CompletableFuture<List<Transaction>> transactions = allDone.thenApply(relevances -> relevances.stream().map(wsResp -> {
+
+
+             //System.out.println("add transaction to array " + afterParam);
+             ArrayList<Transaction> transactionList = new ArrayList<Transaction>();
+
+            System.out.println("have transaction !");
+            System.out.println(wsResp.getBody());
+             if (wsResp.getStatus() == 200) {
+
+                 ArrayNode arrayRes = (ArrayNode) wsResp.asJson();
+                 Iterator<JsonNode> it = arrayRes.iterator();
+                 while (it.hasNext()) {
+                    Transaction resource = Json.fromJson(it.next(), Transaction.class);
+                    transactionList.add(resource);
+                 }
+             }
+
+             return transactionList;
+
+        }).flatMap( x -> x.stream()).collect(Collectors.toList()));
+
+        //Aggregate all rounded amounts
+        return transactions.thenApply(t -> {
+
+            ObjectNode result = Json.newObject();
+            result.put(
+                "totalRoundedAmount",
+                t.stream().map(x -> x.getRounded_amount()).reduce(0.0f, (i, j) -> i + j)
+            );
+
+            return ok(result);
         });
+    }
+
+    private static <T> CompletableFuture<List<T>> sequence(List<CompletableFuture<T>> futures) {
+        CompletableFuture<Void> allDoneFuture =
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[futures.size()]));
+        return allDoneFuture.thenApply(v ->
+            futures.stream().
+                map(future -> future.join()).
+                collect(Collectors.<T>toList())
+        );
     }
 }

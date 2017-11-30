@@ -1,5 +1,7 @@
-GET     /                           controllers.HomeController.index
 
 
-GET     /rounded-transactions       controllers.HomeController.roundedTransactions(email: String, passwd: String)
+GET        /rounded-transactions                controllers.HomeController.roundedTransactions(email: String, passwd: String, roundType: String)
+
+
+GET        /rounded-transactions/all-users      controllers.HomeController.roundedTransactionsAllUser(dateBegin: Long, dateEnd: Long)
 
