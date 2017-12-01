@@ -29,9 +29,10 @@ public class BankinProvider extends Results implements Provider {
     private String password;
     private String accessToken = "";
     private String afterParam = null;
+    private String host = "https://sync.bankin.com";
 
 
-    //Sure its not the best way to retrieve conf and ws
+    //Sure its not the best way to retrieve config and ws
     public BankinProvider(Configuration config, WSClient ws, String email, String password) {
         this.config = config;
         this.ws = ws;
@@ -39,32 +40,33 @@ public class BankinProvider extends Results implements Provider {
         this.password = password;
     }
 
+
     public CompletionStage<F.Either<ArrayList<Transaction>, Result>> getAllTransaction() {
 
         ArrayList<Transaction> transactionList = new ArrayList<Transaction>();
 
-        WSRequest request = ws.url("https://sync.bankin.com/v2/transactions")
-                .setHeader("Bankin-Version", "2016-01-18")
-                .setHeader("Authorization", "Bearer " + accessToken)
+        WSRequest request = ws.url(this.host + "/v2/transactions")
+                .setHeader("Bankin-Version",        "2016-01-18")
+                .setHeader("Authorization",         "Bearer " + this.accessToken)
                 .setQueryParameter("client_id",     config.getString("bankin.clientId"))
                 .setQueryParameter("client_secret", config.getString("bankin.clientSecret"))
                 .setRequestTimeout(10000);
-        if(afterParam != null){
-            request.setQueryParameter("after", afterParam);
+        if(this.afterParam != null){
+            request.setQueryParameter("after",      this.afterParam);
         }
 
         return request.get().thenComposeAsync(response -> {
 
             //Bankin response has an unauthorized response, so token is bad, so renew token
             if (response.getStatus() == 401) {
-                return renewBankinAccessToken(email, password).thenComposeAsync(hasAccessToken -> {
+                return renewBankinAccessToken().thenComposeAsync(hasAccessToken -> {
 
                     //Token has been released, replay transaction request
                     if (hasAccessToken.left.isPresent()) {
-                        accessToken = hasAccessToken.left.get();
+                        this.accessToken = hasAccessToken.left.get();
                         return getAllTransaction();
                     } else {
-                        //Token not released, render error with status
+                        //Token not released, render Result error
                         return CompletableFuture.supplyAsync(() -> F.Either.Right(hasAccessToken.right.get()));
                     }
                 });
@@ -72,8 +74,6 @@ public class BankinProvider extends Results implements Provider {
 
             JsonNode jsonResp = response.asJson();
             if (jsonResp.has("resources")) {
-
-                //System.out.println("add transaction to array " + afterParam);
 
                 ArrayNode arrayRes = (ArrayNode) jsonResp.withArray("resources");
                 Iterator<JsonNode> it = arrayRes.iterator();
@@ -86,19 +86,15 @@ public class BankinProvider extends Results implements Provider {
                     String jsonNextUri = jsonResp.findPath("pagination").findPath("next_uri").textValue();
                     if (jsonNextUri != null && jsonNextUri.length() > 0) {
                         try {
-                            afterParam = Url.getParamValueUrl(new URL("https://sync.bankin.com" + jsonNextUri), "after");
-                        } catch (MalformedURLException e) {
-                        }
+                            this.afterParam = Url.getParamValueUrl(new URL(this.host + jsonNextUri), "after");
+                        } catch (MalformedURLException e) {}
 
                         //Throttle 10 requests per 1 sec max
                         //NOT a good solution but the async way do not block controller thread
                         //Play 2.6 has a delay option on CompletionStage ;)
-                        try {
-                            Thread.sleep(100);
-                        } catch (InterruptedException e) {
-                        }
+                        try {Thread.sleep(120);} catch (InterruptedException e) {}
 
-                        if (afterParam != null) {
+                        if (this.afterParam != null) {
 
                             //Too complex to deal with either values, have to find a better way
                             return getAllTransaction().thenApply(either -> {
@@ -119,13 +115,16 @@ public class BankinProvider extends Results implements Provider {
     }
 
 
-    private CompletionStage<F.Either<String, Result>> renewBankinAccessToken(String email, String password) {
+    /*
+    Retrieve a new accessToken of the current user
+    */
+    private CompletionStage<F.Either<String, Result>> renewBankinAccessToken() {
 
-        WSRequest request = ws.url("https://sync.bankin.com/v2/authenticate")
-                .setHeader("Bankin-Version", "2016-01-18")
-                .setQueryParameter("password", password)
-                .setQueryParameter("email", email)
-                .setQueryParameter("client_id", config.getString("bankin.clientId"))
+        WSRequest request = ws.url(this.host + "/v2/authenticate")
+                .setHeader("Bankin-Version",        "2016-01-18")
+                .setQueryParameter("password",      this.password)
+                .setQueryParameter("email",         this.email)
+                .setQueryParameter("client_id",     config.getString("bankin.clientId"))
                 .setQueryParameter("client_secret", config.getString("bankin.clientSecret"))
                 .setRequestTimeout(5000);
 

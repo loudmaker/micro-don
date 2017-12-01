@@ -19,6 +19,8 @@ import mappings.User;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import utils.Transformation;
+import utils.Url;
 
 /**
  * This controller contains an action to handle HTTP requests
@@ -32,12 +34,12 @@ public class HomeController extends Controller {
 
     public CompletionStage<Result> roundedTransactions(String email, String password, String roundType) {
 
-        System.out.println("NEW BANKIN PROVIDER FOR " +email + " " +password);
-        //Few checks before processing
+        //Few checks before retrieving all user transaction
         RoundType roundTypeEnum = RoundType.exists(roundType);
         if(roundTypeEnum == null){
             return CompletableFuture.supplyAsync(() ->
-                badRequest("bad enum type '" + roundType + "', please provide enum as : " + RoundType.list.stream().map(Object::toString).collect(Collectors.joining(", ")))
+                badRequest("bad enum type '" + roundType + "', please provide enum as : " +
+                        RoundType.list.stream().map(Object::toString).collect(Collectors.joining(", ")))
             );
         }
 
@@ -53,10 +55,9 @@ public class HomeController extends Controller {
                     x.setRounded_amount(-x.getAmount() - roundTypeEnum.round(-x.getAmount()));
                     return x;
                 }).collect(Collectors.toList())));
-            //Or errors
-            } else {
-                return either.right.get();
             }
+            //Or errors
+            return either.right.get();
         });
     }
 
@@ -69,42 +70,44 @@ public class HomeController extends Controller {
         users.add(new User("user3@mail.com", "a!Strongp#assword3", RoundType.UPPER_TEN_DECIMAL));
 
 
+        //Map over users to create a list of completable future
         List<CompletableFuture<WSResponse>> collect = users.stream().map(x -> {
 
-            WSRequest request = ws.url("http://localhost:9000/rounded-transactions")
-                    .setQueryParameter("email", x.getEmail())
-                    .setQueryParameter("passwd", x.getPassword())
-                    .setQueryParameter("roundType", x.getRoundType().toString())
-                    .setRequestTimeout(10000);
+            //I did better not calling my own api to retrieve transactions, there is an easier way..
+            WSRequest request = ws.url(Url.getCurrentHostName() + "/rounded-transactions")
+                .setQueryParameter("email",     x.getEmail())
+                .setQueryParameter("passwd",    x.getPassword())
+                .setQueryParameter("roundType", x.getRoundType().toString())
+                .setRequestTimeout(10000);
             return request.get().toCompletableFuture();
 
         }).collect(Collectors.toList());
 
 
-        CompletableFuture<List<WSResponse>> allDone = sequence(collect);
-        CompletableFuture<List<Transaction>> transactions = allDone.thenApply(relevances -> relevances.stream().map(wsResp -> {
+        //Then have a completable future of transaction list
+        CompletableFuture<List<WSResponse>> allDone = Transformation.sequence(collect);
+        CompletableFuture<List<Transaction>> transactions =
+                allDone.thenApply(relevances -> relevances.stream().map(wsResp -> {
+
+            ArrayList<Transaction> transactionList = new ArrayList<Transaction>();
 
 
-             //System.out.println("add transaction to array " + afterParam);
-             ArrayList<Transaction> transactionList = new ArrayList<Transaction>();
+            //Having 200 request means having no errors so transaction array retrievement
+            if (wsResp.getStatus() == 200) {
 
-            System.out.println("have transaction !");
-            System.out.println(wsResp.getBody());
-             if (wsResp.getStatus() == 200) {
-
-                 ArrayNode arrayRes = (ArrayNode) wsResp.asJson();
-                 Iterator<JsonNode> it = arrayRes.iterator();
-                 while (it.hasNext()) {
+                ArrayNode arrayRes = (ArrayNode) wsResp.asJson();
+                Iterator<JsonNode> it = arrayRes.iterator();
+                while (it.hasNext()) {
                     Transaction resource = Json.fromJson(it.next(), Transaction.class);
                     transactionList.add(resource);
-                 }
-             }
-
-             return transactionList;
+                }
+            }
+            return transactionList;
 
         }).flatMap( x -> x.stream()).collect(Collectors.toList()));
 
-        //Aggregate all rounded amounts
+
+        //Aggregate all rounded amounts of all my transactions
         return transactions.thenApply(t -> {
 
             ObjectNode result = Json.newObject();
@@ -115,15 +118,5 @@ public class HomeController extends Controller {
 
             return ok(result);
         });
-    }
-
-    private static <T> CompletableFuture<List<T>> sequence(List<CompletableFuture<T>> futures) {
-        CompletableFuture<Void> allDoneFuture =
-            CompletableFuture.allOf(futures.toArray(new CompletableFuture[futures.size()]));
-        return allDoneFuture.thenApply(v ->
-            futures.stream().
-                map(future -> future.join()).
-                collect(Collectors.<T>toList())
-        );
     }
 }

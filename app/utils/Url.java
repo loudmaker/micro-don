@@ -1,5 +1,6 @@
 package utils;
 
+import play.mvc.Http;
 import java.io.UnsupportedEncodingException;
 import java.net.URL;
 import java.net.URLDecoder;
@@ -12,7 +13,7 @@ public class Url {
     /*
     if key exist return value
     else return null
-     */
+    */
     public static String getParamValueUrl(URL url, String key) {
 
         try {
@@ -22,6 +23,9 @@ public class Url {
         }
     }
 
+    /*
+    Get a map of all parameters by key
+    */
     public static Map<String, String> splitQuery(URL url) throws UnsupportedEncodingException {
         Map<String, String> query_pairs = new LinkedHashMap<String, String>();
         String query = url.getQuery();
@@ -31,5 +35,9 @@ public class Url {
             query_pairs.put(URLDecoder.decode(pair.substring(0, idx), "UTF-8"), URLDecoder.decode(pair.substring(idx + 1), "UTF-8"));
         }
         return query_pairs;
+    }
+
+    public static String getCurrentHostName() {
+        return "http" + (Http.Context.current().request().secure()? "s" : "") + "://" + Http.Context.current().request().host();
     }
 }
