@@ -7,6 +7,7 @@ import play.mvc.Result;
 import javax.inject.Inject;
 import play.Configuration;
 import java.lang.String;
+import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -78,7 +79,7 @@ public class HomeController extends Controller {
                 .setQueryParameter("email",     x.getEmail())
                 .setQueryParameter("passwd",    x.getPassword())
                 .setQueryParameter("roundType", x.getRoundType().toString())
-                .setRequestTimeout(10000);
+                .setRequestTimeout(30000);
             return request.get().toCompletableFuture();
 
         }).collect(Collectors.toList());
@@ -113,7 +114,17 @@ public class HomeController extends Controller {
             ObjectNode result = Json.newObject();
             result.put(
                 "totalRoundedAmount",
-                t.stream().map(x -> x.getRounded_amount()).reduce(0.0f, (i, j) -> i + j)
+                t.stream()
+
+                 //I did better avoid retrieve all transaction pages and stop it
+                 // when transactions are not on the date range
+                 .filter(x -> {
+                     long millisecTsDate = Timestamp.valueOf(x.getDate() + " 00:00:00").getTime();
+                     //System.out.println(dateBegin + " " + millisecTsDate + " " + dateEnd);
+                     return (dateBegin <= millisecTsDate && dateEnd >= millisecTsDate);
+                 })                                 //filter transactions between dates given on params
+                 .map(x -> x.getRounded_amount())   //Retrieve only rounded amounts
+                 .reduce(0.0f, (i, j) -> i + j)     //Sum all rounded amounts
             );
 
             return ok(result);
